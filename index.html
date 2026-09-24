@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Love Hand Control 💗</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:radial-gradient(circle at 50% 20%,#3b1735 0,#160d1b 45%,#09070d 100%);color:#fff;overflow-x:hidden}
+body{display:flex;justify-content:center}
+.wrap{width:min(760px,100%);padding:18px 14px 40px;text-align:center;position:relative;z-index:2}
+h1{font-size:clamp(27px,7vw,48px);margin:8px 0 4px}
+.sub{opacity:.78;margin:0 0 16px}
+.card{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.16);border-radius:24px;padding:14px;backdrop-filter:blur(12px);box-shadow:0 18px 50px rgba(0,0,0,.35);margin:12px 0}
+#cameraBox{position:relative;overflow:hidden;border-radius:18px;background:#050508;aspect-ratio:4/3}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+canvas{pointer-events:none}
+#message{min-height:92px;display:flex;align-items:center;justify-content:center;flex-direction:column;font-weight:800}
+#gesture{font-size:clamp(28px,8vw,52px);text-shadow:0 0 24px rgba(255,80,170,.7)}
+#hint{font-size:14px;opacity:.75;margin-top:5px}
+button{border:0;border-radius:999px;padding:13px 20px;font-weight:800;font-size:16px;cursor:pointer;background:#fff;color:#2a1025;margin:5px}
+button:active{transform:scale(.97)}
+button.secondary{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.2)}
+.status{font-size:13px;opacity:.8;margin-top:8px}
+.music iframe{width:100%;height:190px;border:0;border-radius:16px}
+.music-title{font-weight:800;margin:2px 0 8px}
+.hearts{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:1}
+.heart{position:absolute;bottom:-50px;font-size:24px;animation:float 7s linear forwards;opacity:.85}
+@keyframes float{0%{transform:translateY(0) scale(.7) rotate(0deg);opacity:0}10%{opacity:.9}100%{transform:translateY(-115vh) scale(1.5) rotate(25deg);opacity:0}}
+.pop{animation:pop .65s ease}
+@keyframes pop{0%{transform:scale(.5);opacity:.2}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
+.note{font-size:12px;opacity:.62;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="hearts" id="hearts"></div>
+
+<main class="wrap">
+  <h1>💗 Love Hand Control</h1>
+  <p class="sub">Gerakkan tangan di depan kamera dan lihat reaksinya ✨</p>
+
+  <div class="card">
+    <div id="cameraBox">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="canvas"></canvas>
+    </div>
+    <div style="margin-top:12px">
+      <button id="start">📷 Mulai Kamera</button>
+      <button id="stop" class="secondary">⏹ Berhenti</button>
+    </div>
+    <div class="status" id="status">Kamera belum dimulai.</div>
+  </div>
+
+  <div class="card" id="message">
+    <div id="gesture">🖐️</div>
+    <div id="hint">Tunjukkan telapak tangan atau kepalkan tangan</div>
+  </div>
+
+  <div class="card music">
+    <div class="music-title">🎵 My Love Mine All Mine — Mitski</div>
+    <iframe
+      src="https://www.youtube.com/embed/vx4kLgnFexo?rel=0&playsinline=1"
+      title="Mitski - My Love Mine All Mine"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      allowfullscreen></iframe>
+    <p class="note">Video musik ditampilkan dari YouTube resmi Mitski.</p>
+  </div>
+
+  <div class="card">
+    <b>Kontrol tangan</b>
+    <p class="note">✊ Kepal tangan → LOVE 💗<br>✋ Telapak terbuka → I LOVE YOU 💕<br>☝️ Telunjuk → gerakkan kursor hati<br>🤏 Jempol + telunjuk → efek hati</p>
+  </div>
+</main>
+
+<script type="module">
+import {HandLandmarker, FilesetResolver}
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22";
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const gestureEl = document.getElementById("gesture");
+const hintEl = document.getElementById("hint");
+const startBtn = document.getElementById("start");
+const stopBtn = document.getElementById("stop");
+let stream = null, landmarker = null, running = false, lastGesture = "";
+
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function extended(lm, tip, pip){ return dist(lm[tip],lm[0]) > dist(lm[pip],lm[0])*1.18 }
+function classify(lm){
+  const index=extended(lm,8,6), middle=extended(lm,12,10), ring=extended(lm,16,14), pinky=extended(lm,20,18);
+  const openCount=[index,middle,ring,pinky].filter(Boolean).length;
+  const pinch=dist(lm[4],lm[8]) < .065;
+  if(pinch) return "pinch";
+  if(openCount>=3) return "open";
+  if(openCount===0) return "fist";
+  if(index && !middle && !ring && !pinky) return "point";
+  return "other";
+}
+function setGesture(g){
+  if(g===lastGesture) return;
+  lastGesture=g;
+  gestureEl.classList.remove("pop"); void gestureEl.offsetWidth; gestureEl.classList.add("pop");
+  if(g==="fist"){gestureEl.textContent="💗 LOVE";hintEl.textContent="Kepalan tangan terdeteksi — LOVE!";spawnHearts(6)}
+  else if(g==="open"){gestureEl.textContent="💕 I LOVE YOU";hintEl.textContent="Telapak terbuka — I LOVE YOU!";spawnHearts(9)}
+  else if(g==="point"){gestureEl.textContent="☝️";hintEl.textContent="Telunjuk aktif — arahkan tanganmu";spawnHearts(1)}
+  else if(g==="pinch"){gestureEl.textContent="🤏💖";hintEl.textContent="Pinch terdeteksi — hati untukmu!";spawnHearts(4)}
+  else {gestureEl.textContent="🖐️";hintEl.textContent="Coba kepal atau buka telapak tangan";}
+}
+function spawnHearts(n=3){
+  for(let i=0;i<n;i++){
+    const e=document.createElement("div"); e.className="heart";
+    e.textContent=["💗","💖","💕","💘","❤️"][Math.floor(Math.random()*5)];
+    e.style.left=(5+Math.random()*90)+"%";
+    e.style.animationDuration=(4+Math.random()*4)+"s";
+    e.style.fontSize=(18+Math.random()*24)+"px";
+    document.getElementById("hearts").appendChild(e);
+    setTimeout(()=>e.remove(),8000);
+  }
+}
+async function init(){
+  if(landmarker) return;
+  statusEl.textContent="Memuat pendeteksi tangan…";
+  const vision=await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+  );
+  landmarker=await HandLandmarker.createFromOptions(vision,{
+    baseOptions:{
+      modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate:"GPU"
+    },
+    runningMode:"VIDEO", numHands:1,
+    minHandDetectionConfidence:.5,
+    minHandPresenceConfidence:.5,
+    minTrackingConfidence:.5
+  });
+}
+async function start(){
+  try{
+    statusEl.textContent="Meminta akses kamera… 📷";
+    if(!window.isSecureContext){
+      throw new Error("Situs tidak aman (HTTPS diperlukan)");
+    }
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      throw new Error("Browser tidak menyediakan akses kamera");
+    }
+    // Minta kamera SEBELUM memuat model MediaPipe. Jika model/CDN lambat,
+    // browser tetap langsung memunculkan izin kamera.
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false
+    });
+    video.srcObject=stream;
+    await video.play();
+    running=true;
+    statusEl.textContent="Kamera aktif. Memuat pendeteksi tangan… 💗";
+    requestAnimationFrame(loop);
+
+    try{
+      await init();
+      statusEl.textContent="Kamera aktif. Tunjukkan tanganmu! 💗";
+    }catch(modelError){
+      console.error(modelError);
+      statusEl.textContent="Kamera sudah aktif, tetapi pendeteksi tangan gagal dimuat. Periksa internet lalu refresh.";
+    }
+  }catch(e){
+    console.error(e);
+    let msg=e.name ? e.name+": "+e.message : e.message;
+    if(e.name==="NotAllowedError") msg="Izin kamera ditolak. Izinkan kamera untuk situs ini.";
+    else if(e.name==="NotFoundError") msg="Kamera tidak ditemukan di perangkat.";
+    else if(e.name==="NotReadableError") msg="Kamera sedang dipakai aplikasi lain.";
+    statusEl.textContent="❌ "+msg;
+  }
+}
+function stop(){
+  running=false;
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  stream=null; video.srcObject=null;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  statusEl.textContent="Kamera berhenti.";
+}
+function loop(){
+  if(!running) return;
+  if(video.readyState>=2){
+    canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+    const r=landmarker.detectForVideo(video,performance.now());
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(r.landmarks?.length){
+      const lm=r.landmarks[0], g=classify(lm);
+      setGesture(g);
+      ctx.fillStyle="rgba(255,255,255,.9)";
+      const p=lm[8]; ctx.beginPath(); ctx.arc(p.x*canvas.width,p.y*canvas.height,10,0,Math.PI*2); ctx.fill();
+    }
+  }
+  requestAnimationFrame(loop);
+}
+startBtn.onclick=start;
+stopBtn.onclick=stop;
+spawnHearts(4);
+</script>
+</body>
+</html>
